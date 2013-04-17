@@ -1,0 +1,119 @@
+#!/bin/bash
+### BEGIN INIT INFO
+# Provides: zram
+# Required-Start: $local_fs
+# Required-Stop:
+# Default-Start: 2 3 4 5
+# Default-Stop: 0 1 6
+# Short-Description: Increase memory in linux with zram
+# Description: Adapted from script written by tradetaxfree and is found at http://crunchbanglinux.org/forums/topic/15344/zram-a-good-idea/
+### END INIT INFO
+
+# Author: David Sobon <d@sobon.org>
+
+DESC="zram-config"
+NAME="zram-config"
+
+# total memory (pre-compression) percentage of real memory to use for zram
+ZRAM_FACTOR=25
+
+# Read configuration variable file if it is present
+[ -r /etc/default/$NAME ] && . /etc/default/$NAME
+
+# Load the VERBOSE setting and other rcS variables
+. /lib/init/vars.sh
+
+# Define LSB log_* functions.
+# Depend on lsb-base (>= 3.2-14) to ensure that this file is present
+# and status_of_proc is working.
+. /lib/lsb/init-functions
+
+#
+# start
+#
+do_start() {
+	NRDEVICES=$(grep -c ^processor /proc/cpuinfo | sed 's/^0$/1/')
+
+	if modinfo zram | grep -q ' zram_num_devices:' 2>/dev/null; then
+		MODPROBE_ARGS="zram_num_devices=${NRDEVICES}"
+	elif modinfo zram | grep -q ' num_devices:' 2>/dev/null; then
+		MODPROBE_ARGS="num_devices=${NRDEVICES}"
+	else
+		exit 1
+	fi
+	modprobe zram $MODPROBE_ARGS
+
+	if [ $? -gt 0 ]; then
+		echo -e "Your Kernel needs to be compiled with ZRAM support."
+		exit 1
+	fi
+
+	# Calculate memory to use for zram (1/2 of ram)
+	totalmem=`free | grep -e "^Mem:" | sed -e 's/^Mem: *//' -e 's/  *.*//'`
+	mem=$(((totalmem / ${NRDEVICES} * ${ZRAM_FACTOR} / 100) * 1024))
+
+	# initialize the devices
+	for i in $(seq ${NRDEVICES}); do
+		DEVNUMBER=$((i - 1))
+		echo $mem > /sys/block/zram${DEVNUMBER}/disksize
+
+		RETVAL=$?
+		if [ $RETVAL -gt 0 ]; then
+			log_action_msg "/dev/zram# already in use!"
+			return $RETVAL
+		fi
+
+		mkswap /dev/zram${DEVNUMBER} >/dev/null
+		swapon -p 5 /dev/zram${DEVNUMBER} >/dev/null
+	done
+
+	return 0
+}
+
+#
+# stop
+#
+do_stop() {
+	if DEVICES=$(grep zram /proc/swaps | awk '{print $1}'); then
+		for i in $DEVICES; do
+			swapoff $i >/dev/null
+		done
+	fi
+	# todo: redirect to STDOUT to /dev/null
+	rmmod -w zram
+	RETVAL=$?
+
+	return $RETVAL
+}
+
+#
+#
+#
+case "$1" in
+	start)
+		log_daemon_msg "Starting $DESC"
+		do_start
+		case "$?" in
+			0|1) log_end_msg 0 ;;
+			2)   log_end_msg 1 ;;
+		esac
+		;;
+	stop)
+		log_daemon_msg "Stopping $DESC"
+		do_stop
+		case "$?" in
+			0|1) log_end_msg 0 ;;
+			2)   log_end_msg 1 ;;
+		esac
+		;;
+	restart)
+		do_stop
+		sleep 1
+		do_start
+		;;
+	*)
+		echo "Usage: $0 {start|stop|restart}"
+		RETVAL=1
+esac
+
+exit $RETVAL
