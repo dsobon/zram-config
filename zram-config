@@ -7,6 +7,7 @@
 # Default-Stop: 0 1 6
 # Short-Description: Increase memory in linux with zram
 # Description: Adapted from script written by tradetaxfree and is found at http://crunchbanglinux.org/forums/topic/15344/zram-a-good-idea/
+# also ported from Ubuntu's upstart version of zram-config
 ### END INIT INFO
 
 # Author: David Sobon <d@sobon.org>
