@@ -5,7 +5,7 @@
 # Required-Stop:
 # Default-Start: 2 3 4 5
 # Default-Stop: 0 1 6
-# Short-Description: Increase memory in linux with zram
+# Short-Description: enable swap with compressed ram block device backend
 # Description: Adapted from script written by tradetaxfree and is found at http://crunchbanglinux.org/forums/topic/15344/zram-a-good-idea/
 # also ported from Ubuntu's upstart version of zram-config
 ### END INIT INFO
@@ -15,8 +15,9 @@
 DESC="zram-config"
 NAME="zram-config"
 
-# total memory (pre-compression) percentage of real memory to use for zram
-ZRAM_FACTOR=25
+# percentage of real memory to use for zram.
+# note: pre-compressed amount. real memory usage may end up 30-60%
+ZRAM_FACTOR=50
 
 # Read configuration variable file if it is present
 [ -r /etc/default/$NAME ] && . /etc/default/$NAME
@@ -45,11 +46,11 @@ do_start() {
 	modprobe zram $MODPROBE_ARGS
 
 	if [ $? -gt 0 ]; then
-		echo -e "Your Kernel needs to be compiled with ZRAM support."
+		log_failure_msg "Your Kernel needs to be compiled with ZRAM support."
 		exit 1
 	fi
 
-	# Calculate memory to use for zram (1/2 of ram)
+	# Calculate memory to use for zram.
 	totalmem=`free | grep -e "^Mem:" | sed -e 's/^Mem: *//' -e 's/  *.*//'`
 	mem=$(((totalmem / ${NRDEVICES} * ${ZRAM_FACTOR} / 100) * 1024))
 
@@ -60,7 +61,7 @@ do_start() {
 
 		RETVAL=$?
 		if [ $RETVAL -gt 0 ]; then
-			log_action_msg "/dev/zram# already in use!"
+			log_failure_msg "/dev/zram# already in use!"
 			return $RETVAL
 		fi
 
@@ -80,11 +81,26 @@ do_stop() {
 			swapoff $i >/dev/null
 		done
 	fi
-	# todo: redirect to STDOUT to /dev/null
-	rmmod -w zram
+
+	rmmod -w zram  1>/dev/null 2>&1
 	RETVAL=$?
 
 	return $RETVAL
+}
+
+#
+# do_status
+#
+function do_status () {
+	I=$(/sbin/swapon -s | grep zram | wc -l)
+
+	if [ $I -eq 0 ]; then
+		echo "$NAME is NOT running."
+		exit 3
+	fi
+
+	echo "$NAME is running."
+	exit 0
 }
 
 #
@@ -107,10 +123,13 @@ case "$1" in
 			2)   log_end_msg 1 ;;
 		esac
 		;;
-	restart)
+	restart|force-reload)
 		do_stop
 		sleep 1
 		do_start
+		;;
+	status)
+		do_status
 		;;
 	*)
 		echo "Usage: $0 {start|stop|restart}"
